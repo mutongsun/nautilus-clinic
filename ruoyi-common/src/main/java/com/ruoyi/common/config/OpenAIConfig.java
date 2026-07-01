@@ -5,6 +5,11 @@ import org.springframework.stereotype.Component;
 
 /**
  * OpenAI 配置
+ * <p>
+ * 注意：apiKey 为敏感信息，从 application.yml 的 openai.api-key 读取。
+ * 不要将真实 key 提交到版本控制；部署时通过环境变量覆盖。
+ * 若需运行时轮换密钥，重启应用使新配置生效。
+ * </p>
  *
  * @author ruoyi
  */

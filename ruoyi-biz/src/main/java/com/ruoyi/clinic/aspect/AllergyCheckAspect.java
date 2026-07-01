@@ -89,10 +89,26 @@ public class AllergyCheckAspect {
             if (item == null || item.getItemName() == null) {
                 continue;
             }
+            String drugName = item.getItemName();
             for (String allergy : allergies) {
-                if (item.getItemName().contains(allergy)) {
-                    log.warn("高危拦截：患者对【{}】过敏，严禁开具此药！", item.getItemName());
-                    throw new ServiceException("高危拦截：患者对【" + item.getItemName() + "】过敏，严禁开具此药！");
+                if (allergy == null || allergy.trim().isEmpty()) {
+                    continue;
+                }
+                // 单字过敏原过滤：只有出现在药品名开头才报警（避免"林"误匹配"林可霉素"）
+                if (allergy.trim().length() == 1) {
+                    if (drugName.startsWith(allergy.trim())) {
+                        log.warn("高危拦截（单字匹配）：患者对【{}】过敏，药品名以【{}】开头！",
+                                allergy, drugName);
+                        throw new ServiceException("高危拦截：患者对【" + allergy + "】过敏，药品【"
+                                + drugName + "】可能含有过敏成分，严禁开具！");
+                    }
+                    continue;
+                }
+                // 多字过敏原：精确子串匹配（中文药品名中"青霉素"匹配"青霉素V钾片"是合理的）
+                if (drugName.contains(allergy)) {
+                    log.warn("高危拦截：患者对【{}】过敏，药品【{}】包含过敏原！", allergy, drugName);
+                    throw new ServiceException("高危拦截：患者对【" + allergy + "】过敏，严禁开具【"
+                            + drugName + "】！");
                 }
             }
         }

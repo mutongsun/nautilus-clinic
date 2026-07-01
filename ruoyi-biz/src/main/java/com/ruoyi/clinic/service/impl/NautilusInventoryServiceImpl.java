@@ -105,6 +105,8 @@ public class NautilusInventoryServiceImpl extends ServiceImpl<NautilusInventoryM
 
                 // 原子扣减：UPDATE ... SET current_stock = current_stock - quantity
                 // WHERE item_code = ? AND current_stock >= quantity
+                // quantity is int primitive, safe from SQL injection
+                // If this ever accepts external string input, switch to apply("{0}", value)
                 boolean success = this.lambdaUpdate()
                                 .eq(NautilusInventory::getItemCode, itemCode)
                                 .ge(NautilusInventory::getCurrentStock, quantity)

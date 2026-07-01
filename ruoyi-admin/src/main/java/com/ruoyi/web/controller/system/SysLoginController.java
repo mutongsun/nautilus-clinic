@@ -16,9 +16,11 @@ import com.ruoyi.framework.web.service.TokenService;
 import com.ruoyi.system.service.ISysConfigService;
 import com.ruoyi.system.service.ISysUserService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import com.ruoyi.common.constant.Constants;
 import com.ruoyi.common.core.domain.AjaxResult;
@@ -127,7 +129,18 @@ public class SysLoginController {
         return ajax;
     }
 
-    public void unLockUser(String username) {
+    /**
+     * 管理员解锁被锁定的用户账号 — 仅 admin 角色可调用
+     */
+    @PreAuthorize("@ss.hasRole('admin')")
+    @PostMapping("/admin/unlockUser")
+    public AjaxResult unlockUserEndpoint(@RequestParam String username) {
+        unLockUser(username);
+        return AjaxResult.success();
+    }
+
+    /** 内部解锁逻辑，仅限本类内部调用 */
+    private void unLockUser(String username) {
         userService.resetTryCount(username, 0);
         redisCache.deleteObject(username + "-tryGtCount");
     }

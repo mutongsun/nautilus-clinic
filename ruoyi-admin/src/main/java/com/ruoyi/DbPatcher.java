@@ -4,11 +4,21 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.Statement;
 
+/**
+ * 数据库补丁工具 — 手动执行，凭据从环境变量读取。
+ * 用法：java -cp ... com.ruoyi.DbPatcher
+ * 环境变量：DB_PATCHER_URL, DB_PATCHER_USER, DB_PATCHER_PASSWORD
+ */
 public class DbPatcher {
     public static void main(String[] args) {
-        String url = "jdbc:postgresql://127.0.0.1:5432/nautilus_clinic";
-        String user = "postgres";
-        String password = "123456";
+        String url = System.getenv().getOrDefault("DB_PATCHER_URL",
+                "jdbc:postgresql://127.0.0.1:5432/nautilus_clinic");
+        String user = System.getenv().getOrDefault("DB_PATCHER_USER", "postgres");
+        String password = System.getenv("DB_PATCHER_PASSWORD");
+        if (password == null || password.isEmpty()) {
+            System.err.println("❌ 请设置环境变量 DB_PATCHER_PASSWORD");
+            return;
+        }
 
         try {
             Class.forName("org.postgresql.Driver");

@@ -1,5 +1,7 @@
 package com.ruoyi.clinic.util;
 
+import com.ruoyi.common.exception.ServiceException;
+
 import java.math.BigDecimal;
 
 /**
@@ -14,11 +16,12 @@ public final class PrescriptionUtils {
      * 安全解析处方药品数量（兼容 Integer / BigDecimal / String）
      *
      * @param qtyObj 原始数量对象（来自 JSONB Map）
-     * @return 解析后的整型数量，null 时返回 0
+     * @return 解析后的整型数量
+     * @throws ServiceException 当数量无法解析为合法整数时
      */
     public static int parseQuantity(Object qtyObj) {
         if (qtyObj == null) {
-            return 0;
+            throw new ServiceException("处方药品数量不能为空");
         }
         if (qtyObj instanceof Integer) {
             return (Integer) qtyObj;
@@ -26,6 +29,10 @@ public final class PrescriptionUtils {
         if (qtyObj instanceof BigDecimal) {
             return ((BigDecimal) qtyObj).intValue();
         }
-        return Integer.parseInt(qtyObj.toString());
+        try {
+            return Integer.parseInt(qtyObj.toString());
+        } catch (NumberFormatException e) {
+            throw new ServiceException("处方药品数量格式非法: " + qtyObj);
+        }
     }
 }

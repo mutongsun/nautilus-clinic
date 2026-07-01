@@ -86,10 +86,17 @@ public class SecurityConfig {
         return httpSecurity
                 // CSRF禁用，因为不使用session
                 .csrf(csrf -> csrf.disable())
-                // 禁用HTTP响应标头
+                // 禁用HTTP响应标头，并添加安全响应头
                 .headers((headersCustomizer) -> {
                     headersCustomizer.cacheControl(cache -> cache.disable())
-                            .frameOptions(options -> options.sameOrigin());
+                            .frameOptions(options -> options.sameOrigin())
+                            // 安全响应头
+                            .xssProtection(xss -> xss.headerValue(org.springframework.security.web.header.writers.XXssProtectionHeaderWriter.HeaderValue.ENABLED_MODE_BLOCK))
+                            .contentTypeOptions(contentType -> {
+                            })
+                            .httpStrictTransportSecurity(hsts -> hsts
+                                    .includeSubDomains(true)
+                                    .maxAgeInSeconds(31536000));
                 })
                 // 认证失败处理类
                 .exceptionHandling(exception -> exception.authenticationEntryPoint(unauthorizedHandler))

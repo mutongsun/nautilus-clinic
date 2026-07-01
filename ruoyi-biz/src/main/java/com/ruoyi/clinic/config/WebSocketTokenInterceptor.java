@@ -1,5 +1,6 @@
 package com.ruoyi.clinic.config;
 
+import com.ruoyi.common.core.domain.model.LoginUser;
 import com.ruoyi.framework.web.service.TokenService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -19,6 +20,10 @@ import java.util.Map;
  * 由于浏览器 WebSocket API 无法设置自定义 HTTP Header，
  * 客户端需通过 URL query 参数传递 Token：ws://host/ws/queue?token=xxx
  * </p>
+ * <p>
+ * 握手成功后会将 LoginUser 存入 WebSocket session attributes，
+ * 供下游 Handler 做角色级权限过滤。
+ * </p>
  */
 @Slf4j
 @Component
@@ -26,6 +31,9 @@ import java.util.Map;
 public class WebSocketTokenInterceptor implements HandshakeInterceptor {
 
     private final TokenService tokenService;
+
+    /** 存放已验证用户的 attribute key */
+    public static final String LOGIN_USER_ATTR = "loginUser";
 
     @Override
     public boolean beforeHandshake(ServerHttpRequest request, ServerHttpResponse response,
@@ -39,6 +47,7 @@ public class WebSocketTokenInterceptor implements HandshakeInterceptor {
                 try {
                     var loginUser = tokenService.getLoginUser("Bearer " + token);
                     if (loginUser != null) {
+                        attributes.put(LOGIN_USER_ATTR, loginUser);
                         log.info("[WebSocket] Token 验证通过，用户: {}", loginUser.getUsername());
                         return true;
                     }
@@ -50,6 +59,7 @@ public class WebSocketTokenInterceptor implements HandshakeInterceptor {
             // 兜底：从 Authorization Header 获取（非浏览器客户端可能使用）
             var loginUser = tokenService.getLoginUser(httpRequest);
             if (loginUser != null) {
+                attributes.put(LOGIN_USER_ATTR, loginUser);
                 log.info("[WebSocket] Header 验证通过，用户: {}", loginUser.getUsername());
                 return true;
             }

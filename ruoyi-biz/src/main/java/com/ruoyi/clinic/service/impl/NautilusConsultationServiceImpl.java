@@ -57,7 +57,8 @@ public class NautilusConsultationServiceImpl extends ServiceImpl<NautilusConsult
                         }
 
                         int quantity = PrescriptionUtils.parseQuantity(qtyObj);
-
+                        // quantity is int primitive, safe from SQL injection
+                        // If this ever accepts external string input, switch to apply("{0}", value)
                         LambdaUpdateWrapper<NautilusInventory> updateWrapper = new LambdaUpdateWrapper<>();
                         updateWrapper.eq(NautilusInventory::getItemCode, itemCode)
                                         .ge(NautilusInventory::getCurrentStock, quantity)

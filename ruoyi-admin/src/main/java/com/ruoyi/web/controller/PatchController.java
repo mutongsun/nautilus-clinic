@@ -2,18 +2,20 @@ package com.ruoyi.web.controller;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.ruoyi.common.annotation.Anonymous;
-
+/**
+ * 数据库补丁控制器 — 仅限管理员访问
+ */
 @RestController
-@Anonymous
 public class PatchController {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @PreAuthorize("@ss.hasRole('admin')")
     @GetMapping("/patch-db")
     public String patchDb() {
         try {
