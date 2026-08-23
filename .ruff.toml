@@ -1,0 +1,20 @@
+# Ruff 配置：CI 门禁采用"严重错误级"规则集（语法错误/未定义名/无效导入等），
+# 全量 PEP8 格式化约束在团队统一 `ruff format` 后再收紧（避免历史代码噪音阻塞流水线）。
+line-length = 100
+target-version = "py311"
+
+# 排除非 Python 平台代码（Java 业务底座 / Node 脚手架 / 技能库）
+exclude = ["ruoyi-*", "cli", ".agent", "node_modules"]
+
+[lint]
+# 仅启用致命与高价值规则：
+#   E9  语法错误
+#   F63 断言比较错误（assert on tuple 等）
+#   F7  语法级误用（break/continue 位置错误）
+#   F82 未定义名称（NameError 静态捕获）
+#   F401 未使用导入
+select = ["E9", "F63", "F7", "F82", "F401"]
+
+[lint.per-file-ignores]
+"__init__.py" = ["F401"]        # 包导出约定
+"src/tests/*" = ["F401"]        # 测试导入触发注册（noqa 注释为主，双保险）

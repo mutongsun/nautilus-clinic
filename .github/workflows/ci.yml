@@ -1,0 +1,91 @@
+# =============================================================================
+# CI 快速门禁：PR / push 至 dev、main 时必跑
+#   lint        —— ruff 严重错误级检查（秒级）
+#   unit-tests  —— 容器化单元测试（构建 agent 镜像 + postgres/redis 服务）
+#   java-build  —— 真实诊所底座编译验证（仅 ruoyi-*/pom 变更时触发，产物缓存）
+# 全栈 e2e 见 e2e.yml（main push / 手动触发）
+# =============================================================================
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: 安装 ruff
+        run: pip install ruff==0.6.9
+      - name: 严重错误级静态检查
+        run: ruff check src scripts
+
+  unit-tests:
+    name: 单元测试（容器化）
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 准备环境变量
+        run: cp .env.example .env
+
+      - name: 构建测试镜像（agent 与网关同源）
+        run: docker compose build agent-service
+
+      - name: 启动测试依赖（postgres/redis）
+        run: docker compose up -d postgres redis
+
+      - name: 等待依赖健康
+        run: |
+          for i in $(seq 1 30); do
+            docker compose ps --format json postgres redis | grep -q '"Health":"healthy"' && \
+            docker compose ps postgres redis | grep -c healthy | grep -q 2 && break
+            sleep 2
+          done
+          docker compose ps
+
+      - name: 运行 pytest（容器内，PYTHONPATH=/app）
+        run: docker compose run --rm --no-deps agent-service pytest -q
+
+      - name: 失败时导出日志
+        if: failure()
+        run: docker compose logs agent-service postgres redis || true
+
+  java-build:
+    name: Java 业务底座编译（路径过滤）
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    # 仅 Java 底座或构建文件变更时执行（Python 变更不触发全量 Maven 构建）
+    if: |
+      github.event_name == 'push' || (
+        contains(toJson(github.event.pull_request.files.*.path), 'ruoyi-') ||
+        contains(toJson(github.event.pull_request.files.*.path), 'pom.xml') ||
+        contains(toJson(github.event.pull_request.files.*.path), 'docker/clinic.Dockerfile')
+      )
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - name: 编译 ruoyi-admin 及依赖模块（跳过测试）
+        run: mvn -B -q -pl ruoyi-admin -am package -DskipTests
+      - name: 上传 jar 产物（供部署环节复用）
+        uses: actions/upload-artifact@v4
+        with:
+          name: clinic-jar
+          path: ruoyi-admin/target/*.jar
+          retention-days: 7

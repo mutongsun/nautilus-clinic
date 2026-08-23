@@ -1,0 +1,138 @@
+# =============================================================================
+# 全栈 e2e：mock 业务底座（Python）+ 平台全部服务 + ci_e2e.sh 冒烟
+# 触发：push 至 main / 手动 dispatch / 关键路径 PR（可打标签跳过）
+# 说明：真实 Java 底座 e2e 较重（Maven 构建），默认不跑；
+#       需要时手动勾选 with_clinic 输入启用（约 +8 分钟）。
+# =============================================================================
+name: E2E
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      with_clinic:
+        description: "附带真实 Java 底座 e2e（较慢）"
+        type: boolean
+        default: false
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "scripts/ci_e2e.sh"
+      - "docker-compose.yml"
+      - "docker/mock_backend.py"
+      - "docker/*.Dockerfile"
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mock-stack-e2e:
+    name: Mock 全栈 e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 准备环境变量（开启认证）
+        run: cp .env.example .env
+
+      - name: 构建平台镜像
+        run: docker compose build agent-service mcp-gateway
+
+      - name: 启动数据层并等待健康（Agent 启动需建表播种账号）
+        run: |
+          docker compose up -d postgres redis
+          deadline=$(( $(date +%s) + 120 ))
+          until [ "$(docker inspect -f '{{.State.Health.Status}}' postgres 2>/dev/null)" = "healthy" ] \
+            && [ "$(docker inspect -f '{{.State.Health.Status}}' redis 2>/dev/null)" = "healthy" ]; do
+            [ "$(date +%s)" -gt "$deadline" ] && { docker compose logs postgres redis; exit 1; }
+            sleep 3
+          done
+
+      - name: 启动 mock 全栈
+        run: |
+          docker compose --profile mock up -d mock-backend
+          # CI 无真实 Java 底座：为 mock 动态补挂 nautilus-clinic 网络别名
+          # （compose 中该别名已摘除，避免与 --profile clinic 真实模式 DNS 冲突；
+          #   stop/start 保留别名，restart 后续步骤不受影响）
+          NET=$(docker network ls --filter name=nautilus-net --format '{{.Name}}' | head -1)
+          docker network disconnect "$NET" mock-backend
+          docker network connect --alias mock-backend --alias nautilus-clinic --alias conductor-server "$NET" mock-backend
+          docker compose up -d --no-deps mcp-gateway agent-service
+
+      - name: 等待服务就绪（最长 90s）
+        run: |
+          deadline=$(( $(date +%s) + 90 ))
+          until curl -sf http://localhost:8100/health && curl -sf http://localhost:8101/health; do
+            [ "$(date +%s)" -gt "$deadline" ] && { docker compose logs; exit 1; }
+            sleep 3
+          done
+          # 认证就绪探测（auth_user 播种完成才可登录）
+          for i in $(seq 1 15); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8100/auth/login \
+              -H 'Content-Type: application/json' -d '{"username":"admin","password":"Admin@123"}')
+            [ "$code" = "200" ] && break
+            sleep 2
+          done
+          echo "全部服务就绪（含认证）"
+
+      - name: 稳定性验证：幂等（真实链路）
+        run: |
+          docker compose restart mock-backend mcp-gateway
+          sleep 15
+          docker compose exec -T agent-service python scripts/verify_enterprise.py idem
+
+      - name: 稳定性验证：熔断 + 半开恢复
+        run: |
+          docker compose stop mock-backend
+          docker compose exec -T agent-service python scripts/verify_enterprise.py breaker
+          docker compose start mock-backend
+          sleep 32
+          docker compose exec -T agent-service python scripts/verify_enterprise.py recover
+
+      - name: P2 全链路冒烟（认证/角色/异步/审批/落库）
+        run: bash scripts/ci_e2e.sh
+
+      - name: BPM 审批链路（通过 + 驳回）
+        run: |
+          docker compose restart mock-backend mcp-gateway
+          sleep 15
+          docker compose exec -T agent-service python scripts/demo_conductor_flow.py
+
+      - name: 失败时导出全部日志
+        if: failure()
+        run: |
+          docker compose logs agent-service mcp-gateway mock-backend || true
+          docker compose exec -T postgres psql -U nautilus -d nautilus_agent \
+            -c "SELECT tool_name,status FROM agent_audit_log ORDER BY id DESC LIMIT 20;" || true
+
+  clinic-stack-e2e:
+    name: 真实 Java 底座 e2e（可选）
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.with_clinic == true
+    steps:
+      - uses: actions/checkout@v4
+      - name: 准备环境变量
+        run: cp .env.example .env
+      - name: 启动真实 Java 底座（含构建）
+        run: docker compose --profile clinic up -d --build nautilus-clinic
+      - name: 等待底座健康（最长 3 分钟）
+        run: |
+          deadline=$(( $(date +%s) + 180 ))
+          until [ "$(docker inspect -f '{{.State.Health.Status}}' nautilus-clinic 2>/dev/null)" = "healthy" ]; do
+            [ "$(date +%s)" -gt "$deadline" ] && { docker compose logs nautilus-clinic; exit 1; }
+            sleep 5
+          done
+      - name: 真实底座库存接口冒烟
+        run: |
+          curl -sf "http://localhost:8087/clinic/agent/inventory" | grep -q 阿莫西林
+          echo "真实 Java 底座库存接口正常"
+      - name: 下游幂等验证（真实落库）
+        run: |
+          docker compose restart mcp-gateway && sleep 15
+          docker compose exec -T agent-service python scripts/verify_enterprise.py idem

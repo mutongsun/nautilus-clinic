@@ -1,0 +1,11 @@
+# 统一换行符：全仓库 LF（Dockerfile 反斜杠续行遇 CRLF 会断行；shell 脚本 CRLF 直接解析失败）
+* text=auto eol=lf
+# 二进制资源（不做任何换行转换）
+*.png  binary
+*.jpg  binary
+*.gif  binary
+*.ico  binary
+*.ttf  binary
+*.jar  binary
+*.dmp  binary
+*.whl  binary
