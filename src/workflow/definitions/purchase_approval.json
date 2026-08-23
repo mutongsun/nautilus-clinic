@@ -1,0 +1,80 @@
+{
+  "name": "purchase_approval",
+  "description": "药品采购人工审批流程：WAIT 人工审批节点 + DECISION 结果流转 + TERMINATE 双终态。由 MCP 网关启动时自动注册到 Conductor。",
+  "ownerEmail": "agent-platform@nautilus.local",
+  "version": 1,
+  "schemaVersion": 2,
+  "restartable": false,
+  "timeoutPolicy": "TIME_OUT_WF",
+  "timeoutSeconds": 604800,
+  "inputParameters": ["title", "applicant", "items", "remark"],
+  "tasks": [
+    {
+      "name": "wait_for_human_approval",
+      "taskReferenceName": "wait_for_human_approval",
+      "description": "人工审批节点：流程在此无限期暂停，等待审批人通过 Task API 外部完成（output.approved = \"true\"/\"false\"）",
+      "type": "WAIT",
+      "optional": false,
+      "startDelay": 0
+    },
+    {
+      "name": "check_approval",
+      "taskReferenceName": "check_approval",
+      "description": "审批结果流转：按审批输出分支（true 通过 / false 驳回 / 缺省按驳回兜底，防止无输出误放行）",
+      "type": "DECISION",
+      "caseValueParam": "approval_case",
+      "inputParameters": {
+        "approval_case": "${$.wait_for_human_approval.output.approved}"
+      },
+      "decisionCases": {
+        "true": [
+          {
+            "name": "terminate_approved",
+            "taskReferenceName": "terminate_approved",
+            "description": "审批通过：工作流以 COMPLETED 终止并输出 APPROVED（网关 is_approved 放行后续高风险写操作）",
+            "type": "TERMINATE",
+            "inputParameters": {
+              "terminationStatus": "COMPLETED",
+              "workflowOutput": {
+                "approvalResult": "APPROVED"
+              }
+            },
+            "optional": false
+          }
+        ],
+        "false": [
+          {
+            "name": "terminate_rejected",
+            "taskReferenceName": "terminate_rejected",
+            "description": "审批驳回：工作流以 FAILED 终止并输出 REJECTED（网关拦截后续高风险写操作）",
+            "type": "TERMINATE",
+            "inputParameters": {
+              "terminationStatus": "FAILED",
+              "workflowOutput": {
+                "approvalResult": "REJECTED"
+              }
+            },
+            "optional": false
+          }
+        ]
+      },
+      "defaultCase": [
+        {
+          "name": "terminate_rejected_default",
+          "taskReferenceName": "terminate_rejected_default",
+          "description": "缺省兜底：审批任务被无输出完成时按驳回处理（安全优先，绝不放行）",
+          "type": "TERMINATE",
+          "inputParameters": {
+            "terminationStatus": "FAILED",
+            "workflowOutput": {
+              "approvalResult": "REJECTED",
+              "reason": "APPROVAL_OUTPUT_MISSING"
+            }
+          },
+          "optional": false
+        }
+      ],
+      "optional": false
+    }
+  ]
+}

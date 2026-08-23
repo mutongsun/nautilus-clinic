@@ -1,0 +1,18 @@
+# 最小权限策略：每个 Agent 角色仅授予其职责所需工具（开发规范红线 #3）
+# 意图调度 Agent 无任何业务工具权限（总控只做任务分发）
+
+# 业务查询 Agent：仅只读工具
+p, agent-query, query_inventory, invoke
+p, agent-query, query_patient, invoke
+p, agent-query, query_approval_status, invoke
+
+# 业务审批 Agent：仅审批类工具
+p, agent-approval, start_purchase_approval, invoke
+p, agent-approval, query_approval_status, invoke
+
+# 业务操作 Agent：高风险写工具（网关另强制 BPM 校验）+ 只读
+p, agent-operator, create_purchase_order, invoke
+p, agent-operator, dispense_prescription, invoke
+p, agent-operator, query_inventory, invoke
+p, agent-operator, query_patient, invoke
+p, agent-operator, query_approval_status, invoke

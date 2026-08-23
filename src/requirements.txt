@@ -1,0 +1,35 @@
+# ===== Nautilus Agent Platform 依赖清单（镜像禁止 latest，版本固定）=====
+
+# Web 框架
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+
+# 参数校验 / 配置
+pydantic==2.9.2
+pydantic-settings==2.5.2
+
+# HTTP 客户端（外部请求四件套：超时/重试/异常/校验；0.28.1 为 fastmcp 最低要求）
+httpx==0.28.1
+tenacity==8.5.0
+
+# 数据库（审计日志 / Agent 状态持久化）
+SQLAlchemy[asyncio]==2.0.35
+asyncpg==0.29.0
+
+# 权限治理（MCP 网关最小权限拦截）
+casbin>=1.30,<2
+
+# MCP 协议（FastMCP 2.x：网关服务端 + Agent 客户端）
+fastmcp>=2.8,<3
+
+# 智能体编排
+langgraph>=0.2.60,<0.4
+langchain-core>=0.3,<0.4
+langchain-openai>=0.2,<0.4
+
+# 缓存（可选启用）
+redis==5.0.8
+
+# 测试
+pytest==8.3.3
+pytest-asyncio==0.23.8

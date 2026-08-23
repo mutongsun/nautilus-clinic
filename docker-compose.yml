@@ -1,0 +1,222 @@
+# =============================================================================
+# Nautilus Agent Platform 全服务容器编排（本地开发唯一启动方式：docker-compose up -d）
+# 规范依据：docs/DOCKER.md（网络统一容器名通信 / 端口统一规划 / volume 持久化 / 健康检查）
+# 默认启动平台核心（Agent + MCP网关 + BPM + PostgreSQL + Redis + 诊所底座）
+# 可选扩展：--profile clinic（诊所系统，Java构建较慢） / --profile full（全部）
+# =============================================================================
+
+services:
+  # ---------- 数据存储 ----------
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-nautilus}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_DB: ${POSTGRES_DB:-nautilus_agent}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      - ./docker/initdb:/docker-entrypoint-initdb.d:ro   # 多库创建 + 诊所表结构初始化
+      - ./sql:/clinic-sql:ro                             # 诊所业务底座 SQL 源
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nautilus}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - nautilus-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: unless-stopped
+    # 内部服务，不对外暴露端口（网络规范 5.2）
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - nautilus-net
+
+  # ---------- BPM 审批引擎 ----------
+  conductor-server:
+    image: conductoross/conductor-standalone:3.21.10
+    container_name: conductor-server
+    restart: unless-stopped
+    environment:
+      CONDUCTOR.grpc-server.enabled: "false"
+      # 骨架阶段使用内存持久化；生产演进为 PostgreSQL 持久化（扩展方向）
+    ports:
+      - "${CONDUCTOR_UI_PORT:-5000}:5000"   # 审批控制台 UI
+      # API 8080 仅容器内网访问，不对外暴露
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/localhost/8080' || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    networks:
+      - nautilus-net
+
+  # ---------- MCP 网关（核心创新层：权限/校验/BPM强校验/审计）----------
+  mcp-gateway:
+    build:
+      context: ./src
+      dockerfile: ../docker/gateway.Dockerfile
+    container_name: mcp-gateway
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-nautilus}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-nautilus_agent}
+    ports:
+      - "${MCP_GATEWAY_PORT:-8101}:8101"
+    volumes:
+      - ./src:/app/src          # 代码挂载：本地修改、容器生效（改完 restart 本服务）
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8101), timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      conductor-server:
+        condition: service_started
+    networks:
+      - nautilus-net
+
+  # ---------- Agent 服务（LangGraph 多智能体编排）----------
+  agent-service:
+    build:
+      context: ./src
+      dockerfile: ../docker/agent.Dockerfile
+    container_name: agent-service
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-nautilus}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-nautilus_agent}
+      PYTHONPATH: /app    # 单测导入 src.* 依赖（容器内代码根为 /app/src，包根为 /app）
+    command: uvicorn src.api.main:app --host 0.0.0.0 --port 8100 --reload   # 开发热重载
+    ports:
+      - "${AGENT_PORT:-8100}:8100"
+    volumes:
+      - ./src:/app/src          # 热挂载：本地改代码，容器内 --reload 立即生效
+      - ./scripts:/app/scripts:ro   # 演示/运维脚本挂载（demo_approval 等）
+      - ./pytest.ini:/app/pytest.ini:ro   # 单测配置（asyncio_mode 等）
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8100/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    depends_on:
+      mcp-gateway:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - nautilus-net
+
+  # ---------- 诊所业务底座（真实 Java 系统，Agent 采购下单/库存查询数据源）----------
+  # 启动：docker compose --profile clinic up -d --build nautilus-clinic
+  # 与 mock 的区别：真实 PostgreSQL 落库 + 下游级幂等（nautilus_purchase_order.idempotency_key 唯一索引）
+  nautilus-clinic:
+    profiles: ["clinic", "full"]
+    build:
+      context: .
+      dockerfile: docker/clinic.Dockerfile
+    container_name: nautilus-clinic
+    restart: unless-stopped
+    environment:
+      # 数据源（relaxed binding 映射 spring.datasource.druid.master.*）
+      SPRING_DATASOURCE_DRUID_MASTER_URL: jdbc:postgresql://postgres:5432/nautilus_clinic?currentSchema=ruoyi&stringtype=unspecified
+      SPRING_DATASOURCE_DRUID_MASTER_USERNAME: ${POSTGRES_USER:-nautilus}
+      SPRING_DATASOURCE_DRUID_MASTER_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      # Redis（缓存/会话）
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_DATABASE: "2"
+      # JWT 密钥（匿名内网接口不依赖，但应用启动校验长度）
+      TOKEN_SECRET: ${CLINIC_JWT_SECRET:-nautilus-clinic-dev-secret-please-change-32bytes}
+      # 上传目录/站点
+      RUOYI_PROFILE: /tmp/nautilus-upload
+      RUOYI_SITEURL: http://localhost:8087
+      TZ: Asia/Shanghai
+    ports:
+      - "${CLINIC_API_PORT:-8087}:8087"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8087/clinic/inventory/list || exit 1"]
+      interval: 20s
+      timeout: 8s
+      retries: 10
+      start_period: 90s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - nautilus-net
+
+  # ---------- 可选扩展底座（接入时取消注释并固定镜像版本，禁止 latest）----------
+  # jsh-erp:
+  #   profiles: ["erp", "full"]
+  #   image: jsherp:<固定版本>
+  #   ports: ["8091:8091"]
+  #   networks: [nautilus-net]
+  #
+  # nocobase:
+  #   profiles: ["nocobase", "full"]
+  #   image: nocobase/nocobase:<固定版本>
+  #   ports: ["8092:8092"]
+  #   networks: [nautilus-net]
+
+  # ---------- 演示用 Mock 业务底座（标准库零依赖，仅演示环境）----------
+  # 真实诊所底座（--profile clinic）启动后，mock 仅保留 Conductor BPM 模拟
+  # （nautilus-clinic 别名已摘除，避免与真实服务 DNS 冲突）
+  mock-backend:
+    profiles: ["mock"]
+    image: python:3.11-slim
+    container_name: mock-backend
+    restart: unless-stopped
+    command: python /app/mock_backend.py
+    volumes:
+      - ./docker/mock_backend.py:/app/mock_backend.py:ro
+    ports:
+      - "${MOCK_PORT:-9000}:9000"   # 宿主机端口供控制台前端调用审批演示端点
+    networks:
+      nautilus-net:
+        aliases:
+          - conductor-server     # 仅顶替 Conductor 域名（真实镜像被加速器白名单拦截的过渡方案）
+
+  # ---------- TLS 反向代理（P2 HTTPS，自签证书；生产换正式证书/云 LB）----------
+  # 启用：先生成证书（见 docs/DOCKER.md 8.2），再 docker compose --profile tls up -d
+  tls-proxy:
+    profiles: ["tls"]
+    image: nginx:1.27-alpine
+    container_name: tls-proxy
+    restart: unless-stopped
+    ports:
+      - "${TLS_PORT:-8443}:443"
+    volumes:
+      - ./docker/nginx/nginx-tls.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./docker/nginx/certs:/etc/nginx/certs:ro
+    depends_on:
+      agent-service:
+        condition: service_started
+    networks:
+      - nautilus-net
+
+networks:
+  nautilus-net:
+    driver: bridge
+
+volumes:
+  pg-data:
+  redis-data:

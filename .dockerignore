@@ -1,0 +1,13 @@
+# 根构建上下文排除项（诊所业务底座 Java 构建，context=.）
+.git
+.agent
+.claude
+.vscode
+docs
+openspec
+**/node_modules
+**/__pycache__
+**/target
+**/*.log
+.env
+*.sql.gz

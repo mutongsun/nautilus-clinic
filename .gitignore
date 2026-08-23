@@ -54,6 +54,16 @@ yarn.lock
 pnpm-lock.yaml
 
 ######################################################################
+# Python（Nautilus Agent Platform / src）
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+
+######################################################################
+# TLS 证书（本地生成，禁止提交）
+docker/nginx/certs/
+
 # Sensitive / Local data — DO NOT COMMIT
 # Database dumps (may contain full patient data)
 nautilus_clinic_dump.sql

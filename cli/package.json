@@ -1,0 +1,12 @@
+{
+  "name": "nautilus-agent-cli",
+  "version": "0.1.0",
+  "description": "Nautilus Agent Platform 工程脚手架：一键生成企业级 Agent 工程模板",
+  "bin": {
+    "nautilus-agent": "./bin/nautilus-agent.js"
+  },
+  "engines": {
+    "node": ">=16"
+  },
+  "license": "MIT"
+}
