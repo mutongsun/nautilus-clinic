@@ -31,7 +31,18 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
 
 
 async def init_db() -> None:
-    """初始化表结构（骨架阶段 create_all；生产演进为 alembic 迁移）。"""
-    engine = get_engine()
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    """初始化表结构（骨架阶段 create_all；生产演进为 alembic 迁移）。
+
+    使用一次性独立引擎并在完成后 dispose——禁止触碰全局懒加载引擎：
+    启动预热（asyncio.run）与正式服务（uvicorn）运行在不同 event loop，
+    asyncpg 连接绑定创建时的 loop，跨 loop 复用会抛
+    "Future attached to a different loop" 导致审计/幂等查询持续降级。
+    """
+    from src.config.settings import get_settings
+
+    engine = create_async_engine(get_settings().database_url)
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+    finally:
+        await engine.dispose()

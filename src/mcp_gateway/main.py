@@ -28,16 +28,17 @@ def main() -> None:
             logger.exception("审计表初始化失败（将继续以JSON日志兜底启动）")
 
         # Conductor 冷启动较慢，有限次重试注册审批工作流（定义见 src/workflow/definitions/）
+        # CI/编排环境中 mock 与网关常被并行重启：窗口须覆盖下游就绪延迟
         from src.workflow.conductor import get_conductor_client
 
-        for attempt in range(1, 4):
+        for attempt in range(1, 7):
             try:
                 await get_conductor_client().ensure_workflow_registered(
                     settings.conductor_purchase_workflow
                 )
                 break
             except Exception:  # noqa: BLE001
-                if attempt == 3:
+                if attempt == 6:
                     logger.exception("BPM 工作流注册失败（网关仍将启动，可手动重试）")
                 else:
                     await asyncio.sleep(5)

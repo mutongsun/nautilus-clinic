@@ -81,8 +81,11 @@ jobs:
 
       - name: 稳定性验证：幂等（真实链路）
         run: |
-          docker compose restart mock-backend mcp-gateway
-          sleep 15
+          docker compose restart mock-backend
+          for i in $(seq 1 30); do curl -sf http://localhost:9000/health >/dev/null && break; sleep 1; done
+          docker compose restart mcp-gateway
+          for i in $(seq 1 30); do curl -sf http://localhost:8101/health >/dev/null && break; sleep 1; done
+          sleep 3
           docker compose exec -T agent-service python scripts/verify_enterprise.py idem
 
       - name: 稳定性验证：熔断 + 半开恢复
@@ -98,8 +101,11 @@ jobs:
 
       - name: BPM 审批链路（通过 + 驳回）
         run: |
-          docker compose restart mock-backend mcp-gateway
-          sleep 15
+          docker compose restart mock-backend
+          for i in $(seq 1 30); do curl -sf http://localhost:9000/health >/dev/null && break; sleep 1; done
+          docker compose restart mcp-gateway
+          for i in $(seq 1 30); do curl -sf http://localhost:8101/health >/dev/null && break; sleep 1; done
+          sleep 3
           docker compose exec -T agent-service python scripts/demo_conductor_flow.py
 
       - name: 失败时导出全部日志
