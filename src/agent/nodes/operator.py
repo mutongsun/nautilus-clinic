@@ -79,10 +79,12 @@ async def _fetch_low_stock_items(
 
 
 def _extract_supplier(instruction: str) -> str | None:
-    """从用户指令提取供应商（如「向国药控股下单」）。"""
+    """从用户指令提取供应商（如「向国药控股下单/采购/执行订单」）。"""
     import re
 
-    match = re.search(r"向([\u4e00-\u9fa5A-Za-z（）()]{2,20}?)(?:下单|采购|进货)", instruction)
+    match = re.search(
+        r"向([\u4e00-\u9fa5A-Za-z（）()]{2,20}?)(?:下单|采购|进货|订购|执行订单)", instruction
+    )
     return match.group(1) if match else None
 
 
