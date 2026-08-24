@@ -69,6 +69,9 @@ services:
     build:
       context: ./src
       dockerfile: ../docker/gateway.Dockerfile
+      args:                        # 国内网络经 .env 注入镜像源加速；CI 留空走官方源
+        APT_MIRROR: ${APT_MIRROR:-}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-}
     container_name: mcp-gateway
     restart: unless-stopped
     env_file: .env
@@ -97,6 +100,9 @@ services:
     build:
       context: ./src
       dockerfile: ../docker/agent.Dockerfile
+      args:                        # 国内网络经 .env 注入镜像源加速；CI 留空走官方源
+        APT_MIRROR: ${APT_MIRROR:-}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-}
     container_name: agent-service
     restart: unless-stopped
     env_file: .env
