@@ -38,7 +38,10 @@ class ConductorClient(BaseHttpClient):
     async def start_workflow(
         self, workflow_name: str, correlation_id: str, payload: dict[str, Any]
     ) -> str:
-        """发起审批工作流。
+        """发起审批工作流（对下游丢失定义自愈：404 未注册时重注册后重试一次）。
+
+        真实 Conductor 集群重启/定义被清同样会出现 "workflow not registered"，
+        网关仅在自身启动时注册一次不够——此处按需自愈重注册，生产级韧性。
 
         Args:
             workflow_name: 工作流定义名（如 purchase_approval）。
@@ -48,12 +51,26 @@ class ConductorClient(BaseHttpClient):
         Returns:
             Conductor 工作流实例 ID（即审计字段 bpm_workflow_id）。
         """
-        workflow_id = await self._request(
-            "POST",
-            f"/api/workflow/{workflow_name}",
-            params={"correlationId": correlation_id},
-            json_body=payload,
-        )
+        try:
+            workflow_id = await self._request(
+                "POST",
+                f"/api/workflow/{workflow_name}",
+                params={"correlationId": correlation_id},
+                json_body=payload,
+            )
+        except BizClientError as exc:
+            if "not registered" not in str(exc):
+                raise
+            logger.warning(
+                "工作流定义丢失（下游重启所致），自动重注册后重试: workflow=%s", workflow_name
+            )
+            await self.ensure_workflow_registered(workflow_name)
+            workflow_id = await self._request(
+                "POST",
+                f"/api/workflow/{workflow_name}",
+                params={"correlationId": correlation_id},
+                json_body=payload,
+            )
         return str(workflow_id)
 
     async def get_workflow_status(self, workflow_id: str) -> dict[str, Any]:
